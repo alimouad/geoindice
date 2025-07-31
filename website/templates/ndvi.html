@@ -1,0 +1,465 @@
+{% extends "base.html" %}
+{% block title %}NDVI Calculator with Download{% endblock %}
+{% block content %}
+<div class="container mx-auto px-4 py-8 overflow-y-auto" style="max-height: 100vh;">
+    <div id="loader" class="hidden flex justify-center items-center my-6">
+        <div class="animate-spin rounded-full h-8 w-8 border-t-4 border-blue-500 border-solid"></div>
+        <span class="ml-3 text-blue-600 font-medium">Processing NDVI...</span>
+    </div>
+
+    <div class="bg-green-50 text-sm text-gray-800 p-4 rounded-lg mb-4">
+        <div class="flex justify-between items-center cursor-pointer" onclick="toggleHowItWorks()">
+            <h3 class="font-semibold text-base">🧭 How to Use the NDVI Calculator</h3>
+            <svg id="howItWorksIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-500 transform transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+        </div>
+
+        <div id="howItWorksContent" class="mt-3 hidden"> {# Initially hidden #}
+            <ul class="list-disc list-inside space-y-1">
+                <li>Upload the **RED** and **NIR** band files (.tif).</li>
+                <li>Choose colors for land cover types (Water, Bare, Sparse, Dense).</li>
+                <li>Click **"Calculate NDVI"** to process the data.</li>
+                <li>View the NDVI image, legend, and statistics.</li>
+                <li>Click **"Download NDVI Image"** to save the result.</li>
+            </ul>
+        </div>
+    </div>
+    
+    <h1 class="text-3xl font-bold text-center mb-8 sticky top-0 bg-white py-4 z-10">NDVI Calculator</h1>
+    
+    <div class="h-96 mt-4 rounded-lg border-2 mb-4 border-green-500 border-solid" id="mapContainer">
+        <div id="leafletMap" class="w-full h-full"></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="md:col-span-1 bg-white p-6 rounded-lg shadow-md sticky top-24 self-start">
+            <h2 class="text-xl font-semibold mb-4">Band Import</h2>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Upload Red Band (TIFF)
+                </label>
+                <input type="file" id="redBandFile" accept=".tif,.tiff"
+                       class="block w-full text-sm text-gray-500
+                             file:mr-4 file:py-2 file:px-4
+                             file:rounded-md file:border-0
+                             file:text-sm file:font-semibold
+                             file:bg-red-50 file:text-red-700
+                             hover:file:bg-red-100">
+                <div id="redBandInfo" class="mt-1 text-xs text-gray-500 overflow-x-hidden">No file selected</div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Upload NIR Band (TIFF)
+                </label>
+                <input type="file" id="nirBandFile" accept=".tif,.tiff"
+                       class="block w-full text-sm text-gray-500
+                             file:mr-4 file:py-2 file:px-4
+                             file:rounded-md file:border-0
+                             file:text-sm file:font-semibold
+                             file:bg-green-50 file:text-green-700
+                             hover:file:bg-green-100">
+                <div id="nirBandInfo" class="mt-1 text-xs text-gray-500 overflow-x-hidden">No file selected</div>
+            </div>
+
+            <div class="mb-4 border-t pt-4">
+                <h3 class="font-medium mb-2">Color Mapping</h3>
+
+                <div class="grid grid-cols-2 gap-2 mb-2">
+                    <div>
+                        <label class="block text-xs text-gray-700 mb-1">Water (&lt;0.1)</label>
+                        <input type="color" id="colorWater" value="#1a5c9f" class="w-full h-8">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-700 mb-1">Bare (0.1-0.3)</label>
+                        <input type="color" id="colorBare" value="#b38e5a" class="w-full h-8">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs text-gray-700 mb-1">Sparse (0.3-0.5)</label>
+                        <input type="color" id="colorSparse" value="#8db255" class="w-full h-8">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-700 mb-1">Dense (&gt;0.5)</label>
+                        <input type="color" id="colorDense" value="#2a8000" class="w-full h-8">
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" onclick="calculateNDVI()"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-4"
+                id="calculateBtn" disabled>
+                Calculate NDVI
+            </button>
+
+            <button type="button" onclick="downloadNDVI()"
+                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+                id="downloadBtn" disabled>
+                Download NDVI Image
+            </button>
+        </div>
+
+        <div class="md:col-span-2 space-y-6">
+            <div id="ndviCard" class="max-w-3xl mt-8 rounded-2xl shadow-lg bg-white p-4 hidden"> {# Initially hidden #}
+                <h2 class="text-xl font-semibold mb-4 text-center">🛰️ NDVI Result</h2>
+
+                <div id="ndviImageContainer" class="mb-4 flex justify-center items-center overflow-auto"></div>
+
+                <div class="flex flex-wrap justify-around text-sm text-gray-700 border-t pt-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-4 h-4 rounded" id="waterLegendColor"></div> Water (NDVI &lt; 0.1)
+                    </div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-4 h-4 rounded" id="bareLegendColor"></div> Bare (0.1 - 0.3)
+                    </div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-4 h-4 rounded" id="sparseLegendColor"></div> Sparse (0.3 - 0.5)
+                    </div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-4 h-4 rounded" id="denseLegendColor"></div> Dense (> 0.5)
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Statistics</h2>
+                <div id="stats" class="grid grid-cols-3 gap-4">
+                    <div class="bg-blue-50 p-4 rounded-lg text-center">
+                        <p class="text-xs text-blue-600">Min NDVI</p>
+                        <p class="font-bold text-lg" id="minVal">-</p>
+                    </div>
+                    <div class="bg-blue-50 p-4 rounded-lg text-center">
+                        <p class="text-xs text-blue-600">Avg NDVI</p>
+                        <p class="font-bold text-lg" id="avgVal">-</p>
+                    </div>
+                    <div class="bg-blue-50 p-4 rounded-lg text-center">
+                        <p class="text-xs text-blue-600">Max NDVI</p>
+                        <p class="font-bold text-lg" id="maxVal">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">NDVI Distribution Histogram</h2>
+                <div style="height: 300px;"> {# Add a div with a fixed height here #}
+                    <canvas id="ndviChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.4/dist-browser/geotiff.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
+
+<script>
+    // Global variables
+    let ndviChart = null;
+    let redBandData = null;
+    let nirBandData = null;
+    let resultCanvas = document.createElement('canvas'); // Create once globally
+    let leafletMap = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        // Event listeners for color pickers (if you want real-time updates for the inputs themselves)
+        // Note: Legend colors are updated in calculateNDVI
+        document.querySelectorAll('input[type="color"]').forEach(input => {
+            input.addEventListener('input', () => {
+                // You could add a live preview here if desired, otherwise updateColorSamples is not needed.
+            });
+        });
+
+        document.getElementById('redBandFile').addEventListener('change', (e) => handleBandUpload(e, 'red'));
+        document.getElementById('nirBandFile').addEventListener('change', (e) => handleBandUpload(e, 'nir'));
+
+        // Initialize how-to-use section to be hidden by default
+        const howItWorksContent = document.getElementById('howItWorksContent');
+        if (howItWorksContent) {
+            howItWorksContent.classList.add('hidden');
+        }
+    });
+
+    function toggleHowItWorks() {
+        const content = document.getElementById('howItWorksContent');
+        const icon = document.getElementById('howItWorksIcon');
+        content.classList.toggle('hidden');
+        icon.classList.toggle('rotate-180');
+    }
+
+    // Function to convert hex color to RGB object
+    function hexToRgb(hex) {
+        return {
+            r: parseInt(hex.slice(1, 3), 16),
+            g: parseInt(hex.slice(3, 5), 16),
+            b: parseInt(hex.slice(5, 7), 16)
+        };
+    }
+
+    async function handleBandUpload(event, bandType) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const infoElement = document.getElementById(`${bandType}BandInfo`);
+        infoElement.textContent = `Loading ${file.name}...`;
+
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+            const image = await tiff.getImage();
+            const rasters = await image.readRasters();
+            
+            // Use image.getWidth() and image.getHeight() for dimensions
+            const width = image.getWidth();
+            const height = image.getHeight();
+
+            const bandData = {
+                data: rasters[0], // Assuming single band TIFF
+                width: width,
+                height: height,
+                bbox: image.getBoundingBox(),
+                geoKeys: image.getGeoKeys() // Get GeoKeys for projection info
+            };
+
+            if (bandType === 'red') {
+                redBandData = bandData;
+            } else {
+                nirBandData = bandData;
+            }
+
+            infoElement.textContent = `${file.name} (${width}×${height})`;
+
+            checkReadyState();
+
+        } catch (error) {
+            console.error(`Error loading ${bandType} band:`, error);
+            infoElement.textContent = `Error loading ${file.name} - ${error.message}`;
+        }
+    }
+
+    function checkReadyState() {
+        const btn = document.getElementById('calculateBtn');
+        btn.disabled = !(redBandData && nirBandData);
+    }
+
+    async function calculateNDVI() {
+        if (!redBandData || !nirBandData) {
+            alert('Please upload both Red and NIR bands first');
+            return;
+        }
+
+        // Show loader and disable button
+        const loader = document.getElementById('loader');
+        loader.classList.remove('hidden');
+        document.getElementById('calculateBtn').disabled = true; // Disable during calculation
+
+        try {
+            const colors = {
+                water: hexToRgb(document.getElementById('colorWater').value),
+                bare: hexToRgb(document.getElementById('colorBare').value),
+                sparse: hexToRgb(document.getElementById('colorSparse').value),
+                dense: hexToRgb(document.getElementById('colorDense').value)
+            };
+
+            const container = document.getElementById('ndviImageContainer');
+            container.innerHTML = ''; // Clear previous content
+            resultCanvas.width = redBandData.width;
+            resultCanvas.height = redBandData.height;
+            container.appendChild(resultCanvas); // Append the canvas to the container
+
+            const ctx = resultCanvas.getContext('2d');
+            const imageData = ctx.createImageData(resultCanvas.width, resultCanvas.height);
+
+            const ndviValues = [];
+            let min = Infinity, max = -Infinity, sum = 0, validCount = 0;
+
+            for (let i = 0; i < redBandData.data.length; i += 1) {
+                const red = redBandData.data[i];
+                const nir = nirBandData.data[i];
+
+                // Handle potential NoData values (e.g., 0 for both, or if sum is 0)
+                if ((red === 0 && nir === 0) || (red + nir === 0)) {
+                    imageData.data.set([0, 0, 0, 0], i * 4); // Set transparent
+                    continue;
+                }
+
+                const ndvi = (nir - red) / (nir + red);
+                ndviValues.push(ndvi);
+
+                if (!isNaN(ndvi)) {
+                    min = Math.min(min, ndvi);
+                    max = Math.max(max, ndvi);
+                    sum += ndvi;
+                    validCount++;
+                }
+
+                let color;
+                // Classify NDVI values and assign colors based on your thresholds
+                if (ndvi < 0.1) color = colors.water;
+                else if (ndvi < 0.3) color = colors.bare;
+                else if (ndvi < 0.5) color = colors.sparse;
+                else color = colors.dense;
+
+                imageData.data.set([color.r, color.g, color.b, 255], i * 4);
+            }
+
+            // Put the processed image data onto the canvas
+            ctx.putImageData(imageData, 0, 0);
+
+            // Scale the displayed canvas if needed (for better fit in UI)
+            const scale = Math.min(1, 512 / Math.max(resultCanvas.width, resultCanvas.height));
+            resultCanvas.style.width = `${resultCanvas.width * scale}px`;
+            resultCanvas.style.height = `${resultCanvas.height * scale}px`;
+
+            // Update statistics in the UI
+            document.getElementById('minVal').textContent = min.toFixed(3);
+            document.getElementById('maxVal').textContent = max.toFixed(3);
+            document.getElementById('avgVal').textContent = validCount > 0 ? (sum / validCount).toFixed(3) : 'N/A';
+
+            // Enable download buttons
+            document.getElementById('downloadBtn').disabled = false;
+            // Removed resultsDownloadBtn as it's not in the HTML for simplicity.
+            // If you need it, add it to HTML and uncomment.
+
+            // Perform histogram creation
+            createHistogram(ndviValues);
+
+            // Generate Data URL once and reuse it
+            const imgDataUrl = resultCanvas.toDataURL('image/png');
+
+            // --- Leaflet Map Integration ---
+            // Remove existing map if it exists
+            if (leafletMap) {
+                leafletMap.remove();
+                leafletMap = null;
+            }
+
+            // Reproject bbox from source CRS (e.g., UTM) to WGS84 (EPSG:4326) for Leaflet
+            let imageBounds;
+            if (redBandData.bbox && redBandData.bbox.length === 4) {
+                const [minX, minY, maxX, maxY] = redBandData.bbox;
+
+               
+                proj4.defs("EPSG:32630", "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs");
+                // Check if the GeoTIFF has projection information that can be used directly or derive the EPSG code
+                // This is a simplified approach; real-world handling of various projections is complex.
+                
+                let sourceProj = "EPSG:32630"; 
+
+                const southWest = proj4(sourceProj, "EPSG:4326", [minX, minY]);
+                const northEast = proj4(sourceProj, "EPSG:4326", [maxX, maxY]);
+
+                // Leaflet format: [[south_lat, west_lng], [north_lat, east_lng]]
+                imageBounds = [
+                    [southWest[1], southWest[0]], // [lat, lng]
+                    [northEast[1], northEast[0]]  // [lat, lng]
+                ];
+                console.log("Reprojected imageBounds (from assumed UTM to WGS84):", imageBounds);
+            } else {
+                console.warn("Bounding box (bbox) not found or malformed in redBandData. Using default global bounds.");
+                imageBounds = [[-90, -180], [90, 180]]; // Fallback global bounds
+            }
+
+            // Create map
+            leafletMap = L.map('leafletMap').setView(
+                [(imageBounds[0][0] + imageBounds[1][0]) / 2, (imageBounds[0][1] + imageBounds[1][1]) / 2], 10
+            );
+
+            // Add basemap
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(leafletMap);
+
+            // Add NDVI overlay
+            L.imageOverlay(imgDataUrl, imageBounds, {
+                opacity: 0.8
+            }).addTo(leafletMap);
+
+            leafletMap.fitBounds(imageBounds);
+
+            // Show NDVI result card
+            document.getElementById('ndviCard').classList.remove('hidden');
+
+            // Set legend colors
+            document.getElementById('waterLegendColor').style.backgroundColor = document.getElementById('colorWater').value;
+            document.getElementById('bareLegendColor').style.backgroundColor = document.getElementById('colorBare').value;
+            document.getElementById('sparseLegendColor').style.backgroundColor = document.getElementById('colorSparse').value;
+            document.getElementById('denseLegendColor').style.backgroundColor = document.getElementById('colorDense').value;
+
+        } catch (error) {
+            console.error('Error in NDVI calculation:', error);
+            alert('An error occurred during NDVI calculation: ' + error.message);
+        } finally {
+            // Hide loader and re-enable button
+            loader.classList.add('hidden');
+            document.getElementById('calculateBtn').disabled = !(redBandData && nirBandData); // Re-enable if both bands are loaded
+        }
+    }
+
+   function createHistogram(ndviValues) {
+    const ctx = document.getElementById('ndviChart').getContext('2d');
+    if (ndviChart) {
+        ndviChart.destroy(); // Destroy previous chart instance
+    }
+
+    const bins = Array(20).fill(0); // Bins from -1 to 1, 0.1 interval
+    ndviValues.forEach(val => {
+        // Ensure value is within [-1, 1] for binning
+        const clampedVal = Math.min(1, Math.max(-1, val));
+        const bin = Math.min(19, Math.max(0, Math.floor((clampedVal + 1) * 10))); // Scale to 0-19
+        bins[bin]++;
+    });
+
+    ndviChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Array.from({ length: 20 }, (_, i) => `${(-1 + i * 0.1).toFixed(1)} - ${(-1 + (i + 1) * 0.1).toFixed(1)}`),
+            datasets: [{
+                label: 'NDVI Distribution',
+                data: bins,
+                backgroundColor: '#3b82f6', // Tailwind blue-500
+                borderColor: '#2563eb', // Tailwind blue-600
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false, // This is key to respecting parent's height
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Pixel Count' }
+                },
+                x: {
+                    title: { display: true, text: 'NDVI Value' },
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: { mode: 'index', intersect: false }
+            }
+        }
+    });
+}
+
+    function downloadNDVI() {
+        if (!resultCanvas) {
+            alert('No NDVI image to download. Please calculate NDVI first.');
+            return;
+        }
+
+        const link = document.createElement('a');
+        link.download = 'ndvi-result.png';
+        link.href = resultCanvas.toDataURL('image/png');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+</script>
+{% endblock %}
